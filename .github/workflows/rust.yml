@@ -82,6 +82,20 @@ jobs:
       # Ensure there are no uncommitted changes in the repo after running tests
       - run: scripts/changed-files.sh
 
+  # We need the job names to line up in order to block on "test (self-hosted, self-hosted-ubuntu)"
+  test-notrust:
+    name: test
+    needs: diff
+    if: needs.diff.outputs.isRust == 'false'
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os:
+          - [self-hosted, self-hosted-ubuntu]
+      fail-fast: false
+    steps:
+      - run: 'echo "No build required" '
+
   clippy:
     needs: diff
     if: needs.diff.outputs.isRust == 'true'
