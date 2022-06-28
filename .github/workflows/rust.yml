@@ -83,6 +83,7 @@ jobs:
       - run: scripts/changed-files.sh
 
   # We need the job names to line up in order to block on "test (self-hosted, self-hosted-ubuntu)"
+  # even if there are no rust changes in this PR.
   test-notrust:
     name: test
     needs: diff
