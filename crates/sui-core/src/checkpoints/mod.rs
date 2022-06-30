@@ -11,6 +11,7 @@ pub(crate) mod checkpoint_tests;
 use narwhal_executor::ExecutionIndices;
 use rocksdb::Options;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeSet;
 use std::{collections::HashSet, path::Path, sync::Arc};
 use sui_storage::default_db_options;
 use sui_types::{
@@ -19,19 +20,23 @@ use sui_types::{
     committee::{Committee, EpochId},
     error::{SuiError, SuiResult},
     fp_ensure,
-    // messages::CertifiedTransaction,
     messages_checkpoint::{
         AuthenticatedCheckpoint, AuthorityCheckpointInfo, CertifiedCheckpointSummary,
         CheckpointContents, CheckpointDigest, CheckpointFragment, CheckpointRequest,
         CheckpointResponse, CheckpointSequenceNumber, CheckpointSummary, SignedCheckpointSummary,
     },
 };
+use tracing::warn;
 use typed_store::{
     reopen,
     rocks::{open_cf_opts, DBBatch, DBMap},
     Map,
 };
 
+use crate::authority::{AuthorityState, AuthorityStore};
+use crate::authority_active::ActiveAuthority;
+use crate::authority_aggregator::AuthorityAggregator;
+use crate::authority_client::AuthorityAPI;
 use crate::{
     authority::StableSyncAuthoritySigner,
     authority_active::execution_driver::PendCertificateForExecution,
@@ -747,6 +752,23 @@ impl CheckpointStore {
         Ok(None)
     }
 
+    pub fn promote_signed_checkpoint_to_cert(
+        &mut self,
+        checkpoint: &CertifiedCheckpointSummary,
+        committee: &Committee,
+    ) -> SuiResult {
+        checkpoint.verify(committee)?;
+        debug_assert!(matches!(
+            self.latest_stored_checkpoint()?,
+            Some(AuthenticatedCheckpoint::Signed(_))
+        ));
+        self.checkpoints.insert(
+            checkpoint.summary.sequence_number(),
+            &AuthenticatedCheckpoint::Certified(checkpoint.clone()),
+        )?;
+        Ok(())
+    }
+
     /// Processes a checkpoint certificate that this validator just learned about.
     /// Such certificate may either be created locally based on a quorum of signed checkpoints,
     /// or downloaded from other validators to sync local checkpoint state.
@@ -765,12 +787,12 @@ impl CheckpointStore {
         // Get the record in our checkpoint database for this sequence number.
         let current = self.checkpoints.get(checkpoint.summary.sequence_number())?;
 
+        // TODO: Remove all cases except None case.
         match &current {
             // If cert exists, do nothing (idempotent)
             Some(AuthenticatedCheckpoint::Certified(_current_cert)) => Ok(false),
-            // If no such checkpoint is known, then return an error
-            // NOTE: a checkpoint must first be confirmed internally before an external
-            // certificate is registered.
+            // If no such checkpoint is known, we will need to have the full contents
+            // to add the new checkpoint cert locally.
             None => {
                 if let &Some(contents) = &contents {
                     // Check and process contents
@@ -905,6 +927,86 @@ impl CheckpointStore {
             .multi_get(transactions.transactions.iter())?
             .iter()
             .all(|opt| opt.is_some()))
+    }
+
+    async fn wait_for_all_checkpoint_transactions_executed<A>(
+        &self,
+        net: &AuthorityAggregator<A>,
+        store: &Arc<AuthorityStore>,
+        transactions: &CheckpointContents,
+    ) -> SuiResult
+    where
+        A: AuthorityAPI + Send + Sync + 'static + Clone,
+    {
+        loop {
+            let extra_tx = match self
+                .extra_transactions
+                .multi_get(transactions.transactions.iter())
+            {
+                Ok(e) => e,
+                Err(err) => {
+                    warn!("Error loading extra_transactions from store: {:?}", err);
+                    // This shouldn't really happen, but just in case, we go back and retry.
+                    continue;
+                }
+            };
+            let unexecuted = extra_tx
+                .iter()
+                .zip(transactions.transactions.iter())
+                .filter_map(|(opt_seq, digest)| {
+                    if opt_seq.is_none() {
+                        Some(*digest)
+                    } else {
+                        None
+                    }
+                });
+
+            let tx_digests: Vec<_> = unexecuted
+                .clone()
+                .map(|digest| digest.transaction)
+                .collect();
+            let certs = match store.multi_get_certified_transaction(&tx_digests) {
+                Ok(certs) => certs,
+                Err(err) => {
+                    warn!(
+                        "Error loading transaction certificates from store: {:?}",
+                        err
+                    );
+                    // This shouldn't really happen, but just in case, we go back and retry.
+                    continue;
+                }
+            };
+            let all = unexecuted.into_iter().zip(certs.into_iter());
+            for (digest, cert_opt) in all {
+                match cert_opt {
+                    Some(_) => (),
+                    None => {
+                        match net
+                            .handle_transaction_and_effects_info_request(&digest)
+                            .await
+                        {
+                            Err(err) => {
+                                warn!("Error fetching transaction and effects: {:?}", err);
+                            }
+                            Ok(response) => {
+                                if let Some(cert) = response.certified_transaction {
+                                    if let Err(err) = store
+                                        .add_pending_certificates(vec![(digest.transaction, cert)])
+                                    {
+                                        warn!(
+                                            "Error scheduling certificate for execution: {:?}",
+                                            err
+                                        );
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(())
     }
 
     #[cfg(test)]
