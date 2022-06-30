@@ -258,3 +258,104 @@ async fn test_finish_epoch_change() {
         assert!(response.signed_effects.is_some());
     }
 }
+use test_utils::objects::test_gas_objects;
+
+#[tokio::test]
+async fn test_epoch_change_committee_updates() {
+    let (clients, states): (
+        BTreeMap<AuthorityName, NetworkAuthorityClient>,
+        Vec<Arc<AuthorityState>>,
+    ) = init_network_authorities(4);
+
+    let actives: Vec<_> = states
+        .iter()
+        .map(|state| {
+            ActiveAuthority::new_with_ephemeral_follower_store(
+                state.clone(),
+                clients,
+                GatewayMetrics::new_for_tests(),
+            )
+            .unwrap()
+        })
+        .collect();
+
+    let mut gas_objects = test_gas_objects();
+    let transaction = move_transaction(
+        gas_objects.pop.unwrap(),
+        "sui_system",
+        "request_add_validator",
+    );
+}
+pub async fn init_network_authorities(
+    num_authorities: usize,
+) -> (
+    BTreeMap<AuthorityName, NetworkAuthorityClient>,
+    Vec<Arc<AuthorityState>>,
+) {
+    let mut key_pairs = Vec::new();
+    let mut voting_rights = BTreeMap::new();
+    for i in 0..num_authorities {
+        let (_, key_pair) = get_key_pair();
+        let authority_name = *key_pair.public_key_bytes();
+        voting_rights.insert(authority_name, 1);
+        key_pairs.push((authority_name, key_pair));
+    }
+    let committee = Committee::new(0, voting_rights);
+
+    let mut clients = BTreeMap::new();
+    let mut states = Vec::new();
+
+    for (authority_name, secret) in key_pairs.into_iter() {
+        // create store at random directory
+        let dir = env::temp_dir();
+        let path = dir.join(format!("DB_{:?}", ObjectID::random()));
+        fs::create_dir(&path).unwrap();
+        let mut store_path = path.clone();
+        store_path.push("store");
+        let store = Arc::new(AuthorityStore::open(&store_path, None));
+        let mut checkpoints_path = path.clone();
+        checkpoints_path.push("checkpoints");
+        let checkpoints = CheckpointStore::open(
+            &checkpoints_path,
+            None,
+            committee.epoch,
+            address,
+            secret.clone(),
+        )
+        .expect("Should not fail to open local checkpoint DB");
+
+        let state = AuthorityState::new(
+            committee.clone(),
+            authority_name,
+            secret.clone(),
+            store,
+            None,
+            Some(Arc::new(Mutex::new(checkpoints))),
+            None,
+            false,
+            &prometheus::Registry::new(),
+        )
+        .await;
+        // The following two fields are only needed for shared objects (not by this bench).
+        let consensus_address = "/ip4/127.0.0.1/tcp/0/http".parse().unwrap();
+        let (tx_consensus_listener, _rx_consensus_listener) = tokio::sync::mpsc::channel(1);
+
+        let server = AuthorityServer::new(
+            format!("/ip4/127.0.0.1/tcp/{}/http", i).parse().unwrap(),
+            Arc::new(authority_state),
+            consensus_address,
+            tx_consensus_listener,
+        );
+
+        let server_handle = server.spawn().await.unwrap();
+
+        let client = NetworkAuthorityClient::connect(server_handle.address())
+            .await
+            .unwrap();
+
+        states.push(client.state.clone());
+        clients.insert(authority_name, client);
+    }
+
+    (clients, states)
+}
