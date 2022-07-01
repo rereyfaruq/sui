@@ -122,26 +122,30 @@ pub enum ReduceOutput<S> {
 }
 
 #[async_trait]
-pub trait ConfirmationTransactionHandler {
-    async fn handle(&self, cert: ConfirmationTransaction) -> SuiResult<TransactionInfoResponse>;
+pub trait CertificateHandler {
+    async fn handle(&self, certificate: CertifiedTransaction)
+        -> SuiResult<TransactionInfoResponse>;
 
     fn destination_name(&self) -> String;
 }
 
-// Syncs a ConfirmationTransaction to a (possibly) remote authority.
-struct RemoteConfirmationTransactionHandler<A> {
+// Syncs a certificate to a (possibly) remote authority.
+struct RemoteCertificateHandler<A> {
     destination_authority: AuthorityName,
     destination_client: SafeClient<A>,
 }
 
 #[async_trait]
-impl<A> ConfirmationTransactionHandler for RemoteConfirmationTransactionHandler<A>
+impl<A> CertificateHandler for RemoteCertificateHandler<A>
 where
     A: AuthorityAPI + Send + Sync + 'static + Clone,
 {
-    async fn handle(&self, cert: ConfirmationTransaction) -> SuiResult<TransactionInfoResponse> {
+    async fn handle(
+        &self,
+        certificate: CertifiedTransaction,
+    ) -> SuiResult<TransactionInfoResponse> {
         self.destination_client
-            .handle_confirmation_transaction(cert)
+            .handle_certificate(certificate)
             .await
     }
 
@@ -165,11 +169,9 @@ where
         level = "trace",
         skip_all
     )]
-    pub async fn sync_authority_source_to_destination<
-        CertHandler: ConfirmationTransactionHandler,
-    >(
+    pub async fn sync_authority_source_to_destination<CertHandler: CertificateHandler>(
         &self,
-        cert: ConfirmationTransaction,
+        cert: CertifiedTransaction,
         source_authority: AuthorityName,
         cert_handler: &CertHandler,
     ) -> Result<(), SuiError> {
@@ -188,7 +190,7 @@ where
         let mut attempted_certificates: HashSet<TransactionDigest> = HashSet::new();
 
         while let Some(target_cert) = missing_certificates.pop() {
-            let cert_digest = *target_cert.certificate.digest();
+            let cert_digest = *cert.digest();
 
             if processed_certificates.contains(&cert_digest) {
                 continue;
@@ -243,7 +245,7 @@ where
                     "Having source authority run confirmation again"
                 );
                 source_client
-                    .handle_confirmation_transaction(target_cert.clone())
+                    .handle_certificate(target_cert.clone())
                     .await?
             } else {
                 // Unlike the previous case if a certificate created an object that
@@ -286,7 +288,7 @@ where
 
                 // Add it to the list of certificates to sync
                 trace!(?returned_digest, source =? source_authority, "Pushing transaction onto stack");
-                missing_certificates.push(ConfirmationTransaction::new(returned_certificate));
+                missing_certificates.push(returned_certificate);
             }
         }
 
@@ -295,7 +297,7 @@ where
 
     pub async fn sync_certificate_to_authority(
         &self,
-        cert: ConfirmationTransaction,
+        cert: CertifiedTransaction,
         destination_authority: AuthorityName,
         retries: usize,
     ) -> Result<(), SuiError> {
@@ -310,16 +312,16 @@ where
 
     pub async fn sync_certificate_to_authority_with_timeout(
         &self,
-        cert: ConfirmationTransaction,
+        cert: CertifiedTransaction,
         destination_authority: AuthorityName,
         timeout_period: Duration,
         retries: usize,
     ) -> Result<(), SuiError> {
-        let cert_handler = RemoteConfirmationTransactionHandler {
+        let cert_handler = RemoteCertificateHandler {
             destination_authority,
             destination_client: self.authority_clients[&destination_authority].clone(),
         };
-        debug!(cert =? cert.certificate.digest(),
+        debug!(cert =? cert.digest(),
                dest_authority =? destination_authority,
                "Syncing certificate to dest authority");
         self.sync_certificate_to_authority_with_timeout_inner(
@@ -340,10 +342,10 @@ where
     /// the certificate. The time devoted to each attempt is bounded by
     /// `timeout_milliseconds`.
     pub async fn sync_certificate_to_authority_with_timeout_inner<
-        CertHandler: ConfirmationTransactionHandler,
+        CertHandler: CertificateHandler,
     >(
         &self,
-        cert: ConfirmationTransaction,
+        cert: CertifiedTransaction,
         destination_authority: AuthorityName,
         cert_handler: &CertHandler,
         timeout_period: Duration,
@@ -352,7 +354,6 @@ where
         // Extract the set of authorities that should have this certificate
         // and its full history. We should be able to use these are source authorities.
         let mut candidate_source_authorties: HashSet<AuthorityName> = cert
-            .certificate
             .auth_sign_info
             .signatures
             .iter()
@@ -403,7 +404,7 @@ where
                         let inner_err = SuiError::PairwiseSyncFailed {
                             xsource: source_authority,
                             destination: destination_authority,
-                            tx_digest: *cert.certificate.digest(),
+                            tx_digest: *cert.digest(),
                             error: Box::new(err.clone()),
                         };
 
@@ -903,11 +904,7 @@ where
                 // NOTE: this is right now done sequentially, we should do them in parallel using
                 //       the usual FuturesUnordered.
                 let _result = self
-                    .sync_certificate_to_authority(
-                        ConfirmationTransaction::new(cert.clone()),
-                        name,
-                        DEFAULT_RETRIES,
-                    )
+                    .sync_certificate_to_authority(cert.clone(), name, DEFAULT_RETRIES)
                     .await;
 
                 // TODO: collect errors and propagate them to the right place
@@ -1170,7 +1167,6 @@ where
             ?timeout_after_quorum,
             "Broadcasting certificate to authorities"
         );
-        let contains_shared_object = certificate.contains_shared_object();
 
         let state = self
             .quorum_map_then_reduce_with_timeout(
@@ -1182,18 +1178,10 @@ where
                         // - we try to update the authority with the cert, and on error return Err.
                         // - we try to re-process the certificate and return the result.
 
-                        let res = if contains_shared_object {
-                            client.handle_consensus_transaction(ConsensusTransaction::UserTransaction(Box::new(cert_ref.clone())))
-                                .instrument(tracing::trace_span!("handle_consensus_cert", authority =? name))
-                                .await
-                        } else {
-                            client
-                            .handle_confirmation_transaction(ConfirmationTransaction::new(
-                                cert_ref.clone(),
-                            ))
-                                .instrument(tracing::trace_span!("handle_cert", authority =? name))
-                                .await
-                        };
+                        let res =
+                            client.handle_certificate(cert_ref.clone())
+                                .instrument(tracing::trace_span!("handle_certificate", authority =? name))
+                                .await;
 
                         if res.is_ok() {
                             // We got an ok answer, so returning the result of processing
@@ -1213,7 +1201,7 @@ where
                         // If we got LockErrors, we try to update the authority.
                         self
                             .sync_certificate_to_authority(
-                                ConfirmationTransaction::new(cert_ref.clone()),
+                                cert_ref.clone(),
                                 name,
                                 DEFAULT_RETRIES,
                             )
@@ -1223,9 +1211,9 @@ where
 
                         // Now try again
                         client
-                            .handle_confirmation_transaction(ConfirmationTransaction::new(
+                            .handle_certificate(
                                 cert_ref.clone(),
-                            ))
+                            )
                             .instrument(tracing::trace_span!("handle_cert_after_sync", authority =? name, retry = true))
                             .await
                     })

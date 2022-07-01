@@ -12,7 +12,7 @@ use parking_lot::Mutex;
 use sui_types::{
     base_types::{AuthorityName, ExecutionDigests, TransactionDigest},
     error::SuiError,
-    messages::{CertifiedTransaction, ConfirmationTransaction, TransactionInfoRequest},
+    messages::{CertifiedTransaction, TransactionInfoRequest},
     messages_checkpoint::{
         AuthenticatedCheckpoint, AuthorityCheckpointInfo, CertifiedCheckpointSummary,
         CheckpointContents, CheckpointDigest, CheckpointFragment, CheckpointRequest,
@@ -793,7 +793,7 @@ where
             // If we have cert, use that cert to sync
             if let Some(cert) = response.certified_transaction {
                 net.sync_certificate_to_authority_with_timeout(
-                    ConfirmationTransaction::new(cert.clone()),
+                    cert.clone(),
                     name,
                     // Ok to have a fixed, and rather long timeout, since the future is controlled,
                     // and interrupted by a global timeout as well, that can be controlled.
@@ -815,7 +815,7 @@ where
 
                 // Make sure the cert is syned with this authority
                 net.sync_certificate_to_authority_with_timeout(
-                    ConfirmationTransaction::new(cert.clone()),
+                    cert.clone(),
                     name,
                     // Ok to have a fixed, and rather long timeout, since the future is controlled,
                     // and interrupted by a global timeout as well, that can be controlled.

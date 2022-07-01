@@ -7,7 +7,7 @@ use typed_store::Map;
 
 use crate::{authority::AuthorityState, authority_client::AuthorityAPI};
 
-use super::{gossip::LocalConfirmationTransactionHandler, ActiveAuthority};
+use super::{gossip::LocalCertificateHandler, ActiveAuthority};
 
 #[cfg(test)]
 pub(crate) mod tests;
@@ -92,7 +92,7 @@ where
         .map(|((i, d), c)| (i, d, c.as_ref().expect("certificate must exist")))
         .collect();
 
-    let local_handler = LocalConfirmationTransactionHandler {
+    let local_handler = LocalCertificateHandler {
         state: active_authority.state.clone(),
     };
 
@@ -109,7 +109,7 @@ where
 
         // Sync and Execute with local authority state
         net.sync_certificate_to_authority_with_timeout_inner(
-            sui_types::messages::ConfirmationTransaction::new(c.clone()),
+            c.clone(),
             active_authority.state.name,
             &local_handler,
             tokio::time::Duration::from_secs(10),
