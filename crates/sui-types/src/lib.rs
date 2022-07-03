@@ -33,6 +33,7 @@ pub mod storage;
 pub mod sui_serde;
 pub mod sui_system_state;
 pub mod waypoint;
+pub mod helpers;
 
 // Only uncomment one 
 pub mod ed25519;

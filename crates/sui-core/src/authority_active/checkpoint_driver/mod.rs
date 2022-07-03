@@ -471,7 +471,7 @@ where
     // We use the latest available authorities not the authorities that signed the checkpoint
     // since these might be gone after the epoch they were active.
     let available_authorities: BTreeSet<_> = latest_known_checkpoint
-        .signatory_authorities().into_iter().collect();
+        .signatory_authorities(&net.committee).into_iter().collect();
 
     // Check if the latest checkpoint is merely a signed checkpoint, and if
     // so download a full certificate for it.
@@ -573,7 +573,7 @@ where
     A: AuthorityAPI + Send + Sync + 'static + Clone,
 {
     let mut available_authorities: BTreeSet<_> =
-        checkpoint.signatory_authorities().into_iter().collect();
+        checkpoint.signatory_authorities(&net.committee).into_iter().collect();
     available_authorities.remove(&name);
 
     loop {

@@ -71,7 +71,7 @@ fn make_cert(network_config: &NetworkConfig, tx: &Transaction) -> CertifiedTrans
         let sig = AuthoritySignature::new(&tx.data, secx);
         signatures.push((*pubx, sig));
     }
-    CertifiedTransaction::new_with_signatures(committee.epoch(), tx.clone(), signatures).unwrap()
+    CertifiedTransaction::new_with_signatures(committee.epoch(), tx.clone(), signatures, &committee).unwrap()
 }
 
 fn make_transactions(

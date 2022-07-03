@@ -989,15 +989,15 @@ impl Display for SuiCertifiedTransaction {
         let mut writer = String::new();
         writeln!(writer, "Transaction Hash: {:?}", self.transaction_digest)?;
         writeln!(writer, "Transaction Signature: {:?}", self.tx_signature)?;
-        writeln!(
-            writer,
-            "Signed Authorities : {:?}",
-            self.auth_sign_info
-                .authorities()
-                .iter()
-                .map(|name| name)
-                .collect::<Vec<_>>()
-        )?;
+        // writeln!(
+        //     writer,
+        //     "Signed Authorities : {:?}",
+        //     self.auth_sign_info
+        //         .authorities()
+        //         .iter()
+        //         .map(|name| name)
+        //         .collect::<Vec<_>>()
+        // )?;
         write!(writer, "{}", &self.data)?;
         write!(f, "{}", writer)
     }

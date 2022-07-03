@@ -312,10 +312,11 @@ impl CertifiedCheckpointSummary {
             summary: signed_checkpoints[0].summary.clone(),
             auth_signature: AuthorityWeakQuorumSignInfo::new_with_signatures(
                 committee.epoch,
-                signed_checkpoints
+                &signed_checkpoints
                     .into_iter()
                     .map(|v| (v.auth_signature.authority, v.auth_signature.signature))
-                    .collect::<Vec<_>>()
+                    .collect::<Vec<_>>(),
+                committee,
             )?
         };
 
@@ -323,8 +324,8 @@ impl CertifiedCheckpointSummary {
         Ok(certified_checkpoint)
     }
 
-    pub fn signatory_authorities(&self) -> Vec<AuthorityName> {
-        self.auth_signature.authorities().iter().map(|x| *x).collect::<_>()
+    pub fn signatory_authorities(&self, committee: &Committee) -> Vec<AuthorityName> {
+        self.auth_signature.authorities(committee).iter().map(|x| *x).collect::<_>()
     }
 
     /// Check that a certificate is valid, and signed by a quorum of authorities

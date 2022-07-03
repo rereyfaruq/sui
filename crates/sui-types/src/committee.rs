@@ -11,10 +11,13 @@ use rand_latest::seq::SliceRandom;
 use serde::{Deserialize, Serialize};
 use std::borrow::Borrow;
 use std::collections::{BTreeMap, HashMap};
+use crate::helpers::bitmap::*;
 
 pub type EpochId = u64;
 
 pub type StakeUnit = u64;
+
+pub type CommitteeMap = [u8; 8];
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Committee {
@@ -24,6 +27,8 @@ pub struct Committee {
     // Note: this is a derived structure, no need to store.
     #[serde(skip)]
     expanded_keys: HashMap<AuthorityName, PublicKey>,
+    #[serde(skip)]
+    pub index_map: HashMap<AuthorityName, usize>
 }
 
 impl Committee {
@@ -53,7 +58,9 @@ impl Committee {
             )
         );
 
+        // Note: This is really important for certificate verification 
         voting_rights.sort_by_key(|(a, _)| *a);
+
         let total_votes = voting_rights.iter().map(|(_, votes)| *votes).sum();
         let expanded_keys: HashMap<_, _> = voting_rights
             .iter()
@@ -61,11 +68,18 @@ impl Committee {
             // e.g. when a new validator is registering themself on-chain.
             .map(|(addr, _)| (*addr, (*addr).try_into().expect("Invalid Authority Key")))
             .collect();
+        
+        let index_map: HashMap<_, _> = voting_rights.iter()
+                                        .enumerate()
+                                        .map(|(index, (addr, _) )| (*addr, index))
+                                        .collect(); 
+
         Ok(Committee {
             epoch,
             voting_rights,
             total_votes,
             expanded_keys,
+            index_map
         })
     }
 
@@ -154,6 +168,18 @@ impl Committee {
             }
         }
         unreachable!();
+    }
+
+    pub fn authorities_from_bitmap<'a>(&'a self, bitmap: &'a CommitteeMap) -> impl Iterator<Item = &AuthorityName> {
+        self.voting_rights
+            .iter()
+            .enumerate()    
+            .filter(|&(i, _)| bitmap_get(bitmap, i) == true)
+            .map(|(_, (name, _))| name)
+    }
+
+    pub fn authority_from_index(&self, index: usize) -> &AuthorityName {
+        &self.voting_rights[index].0
     }
 
     pub fn num_members(&self) -> usize {

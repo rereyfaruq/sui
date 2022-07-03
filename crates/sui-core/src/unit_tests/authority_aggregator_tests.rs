@@ -280,6 +280,7 @@ where
         committee.epoch(),
         transaction.unwrap().to_transaction(),
         votes,
+        &committee
     ).unwrap()
 }
 
@@ -737,7 +738,7 @@ async fn test_process_transaction1() {
     // Check which authorities has successfully processed the cert.
     // (NOTE: this method gets the TxInfoResponse from each authority, then reconstructs the cert)
     let cert2 = extract_cert(&authority_clients, &authorities.committee, create2.digest()).await;
-    assert_eq!(3, cert2.auth_sign_info.authorities().len());
+    assert_eq!(3, cert2.auth_sign_info.authorities(&authorities.committee).len());
 }
 
 async fn get_owned_objects(

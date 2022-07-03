@@ -1,7 +1,7 @@
 // Copyright (c) 2022, Mysten Labs, Inc.
 // SPDX-License-Identifier: Apache-2.0
 use crate::base_types::{AuthorityName, SuiAddress};
-use crate::committee::{Committee, EpochId};
+use crate::committee::{Committee, EpochId, CommitteeMap};
 use crate::error::{SuiError, SuiResult};
 use crate::sui_serde::Base64;
 use crate::sui_serde::Readable;
@@ -23,6 +23,7 @@ use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 use std::str::FromStr;
 use crate::crypto_traits::Signable;
+use crate::helpers::bitmap::*;
 
 // TODO: Make sure secrets are not copyable and movable to control where they are in memory
 #[derive(Debug)]
@@ -511,10 +512,12 @@ impl Ed25519AuthoritySignInfo {
 /// at least the quorum threshold (2f+1) of the committee; when STRONG_THRESHOLD is false,
 /// the quorum is valid when the total stake is at least the validity threshold (f+1) of
 /// the committee.
+#[serde_as]
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct Ed25519AuthorityQuorumSignInfo<const STRONG_THRESHOLD: bool> {
     pub epoch: EpochId,
-    pub signatures: Vec<(Ed25519PublicKeyBytes, Ed25519AuthoritySignature)>
+    pub signatures: Vec<Ed25519AuthoritySignature>,
+    pub signers_map: CommitteeMap
 }
 
 impl<const STRONG_THRESHOLD: bool> Ed25519AuthorityQuorumSignInfo<STRONG_THRESHOLD> {
@@ -524,28 +527,50 @@ impl<const STRONG_THRESHOLD: bool> Ed25519AuthorityQuorumSignInfo<STRONG_THRESHO
         Ed25519AuthorityQuorumSignInfo {
             epoch: epoch,
             signatures: vec![],
+            signers_map: empty_bitmap()
         } 
     }
 
     pub fn new_with_signatures(
         epoch: EpochId,
-        signatures: Vec<(Ed25519PublicKeyBytes, Ed25519AuthoritySignature)>
+        signatures: &Vec<(Ed25519PublicKeyBytes, Ed25519AuthoritySignature)>,
+        committee: &Committee
     ) -> SuiResult<Self> {
+        let mut sigs = Vec::new();
+        let mut map: CommitteeMap = empty_bitmap();
+        let mut sorted_signatures = signatures.clone();
+        sorted_signatures.sort_by_key(|(a, _)| *a);
+
+        for (pk, sig) in sorted_signatures {
+            sigs.push(sig);
+            bitmap_set_one(&mut map, committee.index_map[&pk]);
+        };
+
         Ok(Ed25519AuthorityQuorumSignInfo {
-            epoch, signatures
+            epoch,
+            signatures: sigs,
+            signers_map: map 
         })
     }
 
-    pub fn authorities(&self) -> Vec<Ed25519PublicKeyBytes> {
-        self.signatures.iter().map(|(p, s)| *p).collect::<Vec<_>>()
+    pub fn authorities(&self, committee: &Committee) -> Vec<Ed25519PublicKeyBytes> {
+        let mut authorities: Vec<Ed25519PublicKeyBytes> = Vec::new();
+        for i in 0..bitmap_len(&self.signers_map) {
+            if bitmap_get(&self.signers_map, i) {
+                let authority = committee.authority_from_index(i);
+                authorities.push(*authority);
+            }
+        }
+        authorities
     }
 
     pub fn signatures(&self) -> Vec<&Ed25519AuthoritySignature> {
-        self.signatures.iter().map(|(_, s)| s).collect::<Vec<_>>()
+        self.signatures.iter().map(|s| s).collect::<Vec<_>>()
     }
 
-    pub fn add_signature(&mut self, sig: Ed25519AuthoritySignature, pk: Ed25519PublicKeyBytes) {
-        self.signatures.push((pk, sig));
+    pub fn add_signature(&mut self, sig: Ed25519AuthoritySignature, pk: Ed25519PublicKeyBytes, committee: &Committee) {
+        bitmap_set_one(&mut self.signers_map, committee.index_map[&pk]);
+        self.signatures.push(sig);
     }
 
     pub fn verify(
@@ -561,25 +586,20 @@ impl<const STRONG_THRESHOLD: bool> Ed25519AuthorityQuorumSignInfo<STRONG_THRESHO
         );
 
         let mut weight = 0;
-        let mut used_authorities = HashSet::new();
         let mut authorities: Vec<dalek::PublicKey> = Vec::new();
         let mut messages : Vec<&[u8]> = Vec::new();
 
-        for (authority, _) in self.signatures.iter() {
-            // Check that each authority only appears once.
-            fp_ensure!(
-                !used_authorities.contains(authority),
-                SuiError::CertificateAuthorityReuse
-            );
-            used_authorities.insert(*authority);
+        for i in 0..bitmap_len(&self.signers_map) {
+            if bitmap_get(&self.signers_map, i) {
+                let authority = committee.authority_from_index(i);
+                authorities.push(committee.public_key(authority)?);
 
-            // Update weight.
-            let voting_rights = committee.weight(authority);
-            fp_ensure!(voting_rights > 0, SuiError::UnknownSigner);
-            weight += voting_rights;
-
-            authorities.push(committee.public_key(authority)?);
-            messages.push(&message[..])
+                let voting_rights = committee.weight(&authority);
+                fp_ensure!(voting_rights > 0, SuiError::UnknownSigner);
+                weight += voting_rights;
+    
+                messages.push(&message[..])
+            }
         }
 
         let threshold = if STRONG_THRESHOLD {
@@ -596,7 +616,7 @@ impl<const STRONG_THRESHOLD: bool> Ed25519AuthorityQuorumSignInfo<STRONG_THRESHO
                 .collect::<Vec<_>>()[..],
             &self.signatures
                 .iter()
-                .map(|(_, sig)| sig.0)
+                .map(|sig| sig.0)
                 .collect::<Vec<_>>()[..],
             &authorities
                 .iter()

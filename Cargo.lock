@@ -528,6 +528,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "bitmaps"
+version = "3.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "703642b98a00b3b90513279a8ede3fcfa479c126c5fb46e78f3051522f021403"
+
+[[package]]
 name = "blake2"
 version = "0.9.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2796,7 +2802,7 @@ version = "15.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d0acd33ff0285af998aaf9b57342af478078f53492322fafc47450e09397e0e9"
 dependencies = [
- "bitmaps",
+ "bitmaps 2.1.0",
  "rand_core 0.6.3",
  "rand_xoshiro",
  "sized-chunks",
@@ -6253,7 +6259,7 @@ version = "0.6.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "16d69225bde7a69b235da73377861095455d298f2b970996eec25ddbb42b3d1e"
 dependencies = [
- "bitmaps",
+ "bitmaps 2.1.0",
  "typenum",
 ]
 
@@ -7098,6 +7104,7 @@ dependencies = [
  "base64ct",
  "bcs",
  "bincode",
+ "bitmaps 3.2.0",
  "blst",
  "crypto 0.1.0 (git+https://github.com/MystenLabs/narwhal?rev=3cf68183b22acfe014118ef2713d5094159f2f4d)",
  "curve25519-dalek",
@@ -8728,7 +8735,7 @@ dependencies = [
  "bit-set",
  "bit-vec",
  "bitflags",
- "bitmaps",
+ "bitmaps 2.1.0",
  "blake2",
  "blake2s_simd",
  "block-buffer 0.10.2",

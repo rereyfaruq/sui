@@ -1144,10 +1144,11 @@ impl CertifiedTransactionEffects {
         epoch: EpochId,
         effects: TransactionEffects,
         signatures: Vec<(AuthorityName, AuthoritySignature)>,
+        committee: &Committee,
     ) -> SuiResult<Self> {
         Ok(Self {
             effects,
-            auth_signature: AuthorityStrongQuorumSignInfo::new_with_signatures(epoch, signatures)?
+            auth_signature: AuthorityStrongQuorumSignInfo::new_with_signatures(epoch, &signatures, committee)?
         })
     }
 
@@ -1240,7 +1241,7 @@ impl<'a> SignatureAggregator<'a> {
         // Update certificate.
         self.partial
             .auth_sign_info
-            .add_signature(signature, authority);
+            .add_signature(signature, authority, self.committee);
 
         if self.weight >= self.committee.quorum_threshold() {
             Ok(Some(self.partial.clone()))
@@ -1265,13 +1266,14 @@ impl CertifiedTransaction {
         epoch: EpochId,
         transaction: Transaction,
         signatures: Vec<(AuthorityName, AuthoritySignature)>,
+        committee: &Committee,
     ) -> SuiResult<CertifiedTransaction> {
         Ok(CertifiedTransaction {
             transaction_digest: transaction.transaction_digest,
             is_verified: false,
             data: transaction.data,
             tx_signature: transaction.tx_signature,
-            auth_sign_info: AuthorityStrongQuorumSignInfo::new_with_signatures(epoch, signatures)?,
+            auth_sign_info: AuthorityStrongQuorumSignInfo::new_with_signatures(epoch, &signatures, committee)?,
         })
     }
 
@@ -1304,15 +1306,15 @@ impl Display for CertifiedTransaction {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         let mut writer = String::new();
         writeln!(writer, "Transaction Hash: {:?}", self.digest())?;
-        writeln!(
-            writer,
-            "Signed Authorities : {:?}",
-            self.auth_sign_info
-                .authorities()
-                .iter()
-                .map(|name| name)
-                .collect::<Vec<_>>()
-        )?;
+        // writeln!(
+        //     writer,
+        //     "Signed Authorities : {:?}",
+        //     self.auth_sign_info
+        //         .authorities(committee)
+        //         .iter()
+        //         .map(|name| name)
+        //         .collect::<Vec<_>>()
+        // )?;
         write!(writer, "{}", &self.data.kind)?;
         write!(f, "{}", writer)
     }

@@ -354,7 +354,7 @@ where
         let mut candidate_source_authorties: HashSet<AuthorityName> = cert
             .certificate
             .auth_sign_info
-            .authorities()
+            .authorities(&self.committee)
             .into_iter()
             .collect();
 
@@ -1044,6 +1044,7 @@ where
                                             self.committee.epoch(),
                                             transaction_ref.clone(),
                                             state.signatures.clone(),
+                                            &self.committee
                                         )?);
                                     }
                             }
@@ -1306,6 +1307,7 @@ where
                     certificate.auth_sign_info.epoch,
                     effects,
                     signatures,
+                    &self.committee
                 )?);
             }
         }
