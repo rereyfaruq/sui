@@ -10,16 +10,15 @@ use std::{
 
 use parking_lot::Mutex;
 use sui_types::{
-    base_types::{AuthorityName, ExecutionDigests, TransactionDigest},
+    base_types::{AuthorityName, ExecutionDigests},
     error::{SuiError, SuiResult},
-    messages::{CertifiedTransaction, ConfirmationTransaction, TransactionInfoRequest},
+    messages::{CertifiedTransaction, TransactionInfoRequest},
     messages_checkpoint::{
         AuthenticatedCheckpoint, AuthorityCheckpointInfo, CertifiedCheckpointSummary,
         CheckpointContents, CheckpointDigest, CheckpointFragment, CheckpointRequest,
         CheckpointResponse, CheckpointSequenceNumber, SignedCheckpointSummary,
     },
 };
-use tokio::time::timeout;
 
 use crate::{
     authority::AuthorityState,
