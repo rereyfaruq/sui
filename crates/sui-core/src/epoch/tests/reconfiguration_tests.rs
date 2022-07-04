@@ -59,7 +59,7 @@ async fn test_start_epoch_change() {
         })
         .unwrap();
     // Create an active authority for the first authority state.
-    let active = ActiveAuthority::new_with_ephemeral_follower_store(
+    let active = ActiveAuthority::new_with_ephemeral_storage(
         state.clone(),
         net.clone_inner_clients(),
         GatewayMetrics::new_for_tests(),
@@ -178,7 +178,7 @@ async fn test_finish_epoch_change() {
     let actives: Vec<_> = states
         .iter()
         .map(|state| {
-            ActiveAuthority::new_with_ephemeral_follower_store(
+            ActiveAuthority::new_with_ephemeral_storage(
                 state.clone(),
                 net.clone_inner_clients(),
                 GatewayMetrics::new_for_tests(),

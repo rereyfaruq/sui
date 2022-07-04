@@ -148,7 +148,7 @@ async fn end_to_end() {
         let clients = aggregator.clone_inner_clients();
         let _active_authority_handle = tokio::spawn(async move {
             let active_state = Arc::new(
-                ActiveAuthority::new_with_ephemeral_follower_store(
+                ActiveAuthority::new_with_ephemeral_storage(
                     state,
                     clients,
                     GatewayMetrics::new_for_tests(),
@@ -238,7 +238,7 @@ async fn checkpoint_with_shared_objects() {
         let clients = aggregator.clone_inner_clients();
         let _active_authority_handle = tokio::spawn(async move {
             let active_state = Arc::new(
-                ActiveAuthority::new_with_ephemeral_follower_store(
+                ActiveAuthority::new_with_ephemeral_storage(
                     state,
                     clients,
                     GatewayMetrics::new_for_tests(),

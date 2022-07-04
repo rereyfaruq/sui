@@ -33,7 +33,7 @@ async fn checkpoint_active_flow_happy_path() {
         let clients = aggregator.clone_inner_clients();
         let _active_handle = tokio::task::spawn(async move {
             let active_state = Arc::new(
-                ActiveAuthority::new_with_ephemeral_follower_store(
+                ActiveAuthority::new_with_ephemeral_storage(
                     inner_state.authority.clone(),
                     clients,
                     GatewayMetrics::new_for_tests(),
@@ -111,7 +111,7 @@ async fn checkpoint_active_flow_crash_client_with_gossip() {
         let clients = aggregator.clone_inner_clients();
         let _active_handle = tokio::task::spawn(async move {
             let active_state = Arc::new(
-                ActiveAuthority::new_with_ephemeral_follower_store(
+                ActiveAuthority::new_with_ephemeral_storage(
                     inner_state.authority.clone(),
                     clients,
                     GatewayMetrics::new_for_tests(),
@@ -205,7 +205,7 @@ async fn checkpoint_active_flow_crash_client_no_gossip() {
         let clients = aggregator.clone_inner_clients();
         let _active_handle = tokio::task::spawn(async move {
             let active_state = Arc::new(
-                ActiveAuthority::new_with_ephemeral_follower_store(
+                ActiveAuthority::new_with_ephemeral_storage(
                     inner_state.authority.clone(),
                     clients,
                     GatewayMetrics::new_for_tests(),
@@ -299,7 +299,7 @@ async fn test_empty_checkpoint() {
         let clients = aggregator.clone_inner_clients();
         let _active_handle = tokio::task::spawn(async move {
             let active_state = Arc::new(
-                ActiveAuthority::new_with_ephemeral_follower_store(
+                ActiveAuthority::new_with_ephemeral_storage(
                     inner_state.authority.clone(),
                     clients,
                     GatewayMetrics::new_for_tests(),

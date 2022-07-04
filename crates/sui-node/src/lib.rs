@@ -159,8 +159,11 @@ impl SuiNode {
 
             let gateway_metrics =
                 sui_core::gateway_state::GatewayMetrics::new(&prometheus_registry);
+            let pending_store =
+                Arc::new(NodeSyncStore::open(config.db_path().join("node_sync_db"))?);
             let active_authority = Arc::new(ActiveAuthority::new(
                 state.clone(),
+                pending_store,
                 follower_store,
                 authority_clients,
                 gateway_metrics,
@@ -171,12 +174,7 @@ impl SuiNode {
                 let degree = 4;
                 active_authority.spawn_gossip_process(degree).await
             } else {
-                let pending_store =
-                    Arc::new(NodeSyncStore::open(config.db_path().join("node_sync_db"))?);
-
-                active_authority
-                    .spawn_node_sync_process(pending_store)
-                    .await
+                active_authority.spawn_node_sync_process().await
             })
         } else {
             None

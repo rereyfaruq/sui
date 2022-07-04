@@ -11,23 +11,25 @@ use std::{
 use parking_lot::Mutex;
 use sui_types::{
     base_types::{AuthorityName, ExecutionDigests, TransactionDigest},
-    error::SuiError,
+    error::{SuiError, SuiResult},
     messages::{CertifiedTransaction, ConfirmationTransaction, TransactionInfoRequest},
     messages_checkpoint::{
         AuthenticatedCheckpoint, AuthorityCheckpointInfo, CertifiedCheckpointSummary,
         CheckpointContents, CheckpointDigest, CheckpointFragment, CheckpointRequest,
-        CheckpointResponse, CheckpointSequenceNumber, CheckpointSummary, SignedCheckpointSummary,
+        CheckpointResponse, CheckpointSequenceNumber, SignedCheckpointSummary,
     },
 };
 use tokio::time::timeout;
 
 use crate::{
+    authority::AuthorityState,
     authority_aggregator::{AuthorityAggregator, ReduceOutput},
     authority_client::AuthorityAPI,
     checkpoints::{proposal::CheckpointProposal, CheckpointStore},
+    node_sync::NodeSyncState,
 };
+use sui_storage::node_sync_store::NodeSyncStore;
 use sui_types::committee::{Committee, StakeUnit};
-use sui_types::error::SuiResult;
 use tracing::{debug, info, warn};
 
 #[cfg(test)]
@@ -136,10 +138,9 @@ pub async fn checkpoint_process<A>(
             // Check if there are more historic checkpoints to catch up with
             let next_checkpoint = state_checkpoints.lock().next_checkpoint();
             if next_checkpoint < checkpoint.summary.sequence_number {
-                // TODO: The sync process doesn't really work today because we don't yet have a
-                // mechanism to ensure that all past transactions will be executed.
                 if let Err(err) = sync_to_checkpoint(
-                    active_authority.state.name,
+                    active_authority.state.clone(),
+                    active_authority.node_sync_store.clone(),
                     net.clone(),
                     state_checkpoints.clone(),
                     checkpoint.clone(),
@@ -447,7 +448,7 @@ where
                 .collect();
             if let Ok((_, contents)) = get_one_checkpoint_with_contents(
                 net.clone(),
-                &checkpoint.summary,
+                *checkpoint.summary.sequence_number(),
                 &available_authorities,
             )
             .await
@@ -468,7 +469,8 @@ where
 
 /// Download all checkpoints that are not known to us
 pub async fn sync_to_checkpoint<A>(
-    name: AuthorityName,
+    state: Arc<AuthorityState>,
+    node_sync_store: Arc<NodeSyncStore>,
     net: Arc<AuthorityAggregator<A>>,
     checkpoint_db: Arc<Mutex<CheckpointStore>>,
     latest_known_checkpoint: CertifiedCheckpointSummary,
@@ -489,7 +491,7 @@ where
     // so download a full certificate for it.
     if let Some(AuthenticatedCheckpoint::Signed(signed)) = &latest_checkpoint {
         let seq = *signed.summary.sequence_number();
-        debug!("Partial Sync ({name:?}): {seq:?}",);
+        debug!(name = ?state.name, ?seq, "Partial Sync",);
         let (past, _contents) =
             get_one_checkpoint(net.clone(), seq, false, &available_authorities).await?;
 
@@ -507,15 +509,23 @@ where
         .unwrap_or(0);
 
     for seq in full_sync_start..latest_known_checkpoint.summary.sequence_number {
-        debug!("Full Sync ({name:?}): {seq:?}");
+        debug!(name = ?state.name, ?seq, "Full Sync",);
         let (past, contents) =
-            get_one_checkpoint(net.clone(), seq, true, &available_authorities).await?;
+            get_one_checkpoint_with_contents(net.clone(), seq, &available_authorities).await?;
 
-        if let Err(err) =
-            checkpoint_db
-                .lock()
-                .process_checkpoint_certificate(&past, &contents, &net.committee)
-        {
+        sync_checkpoint_certs(
+            state.clone(),
+            node_sync_store.clone(),
+            net.clone(),
+            &contents,
+        )
+        .await?;
+
+        if let Err(err) = checkpoint_db.lock().process_checkpoint_certificate(
+            &past,
+            &Some(contents),
+            &net.committee,
+        ) {
             warn!("Sync Err: {err:?}");
         }
     }
@@ -523,15 +533,29 @@ where
     Ok(())
 }
 
+/// Fetch and execute all certificates in the checkpoint.
+async fn sync_checkpoint_certs<A>(
+    state: Arc<AuthorityState>,
+    node_sync_store: Arc<NodeSyncStore>,
+    net: Arc<AuthorityAggregator<A>>,
+    contents: &CheckpointContents,
+) -> SuiResult
+where
+    A: AuthorityAPI + Send + Sync + 'static + Clone,
+{
+    let sync = NodeSyncState::new(state, net, node_sync_store);
+    sync.sync_checkpoint(contents).await
+}
+
 pub async fn get_one_checkpoint_with_contents<A>(
     net: Arc<AuthorityAggregator<A>>,
-    summary: &CheckpointSummary,
+    seq: CheckpointSequenceNumber,
     available_authorities: &BTreeSet<AuthorityName>,
 ) -> Result<(CertifiedCheckpointSummary, CheckpointContents), SuiError>
 where
     A: AuthorityAPI + Send + Sync + 'static + Clone,
 {
-    get_one_checkpoint(net, *summary.sequence_number(), true, available_authorities)
+    get_one_checkpoint(net, seq, true, available_authorities)
         .await
         // unwrap ok because of true param above.
         .map(|ok| (ok.0, ok.1.unwrap()))

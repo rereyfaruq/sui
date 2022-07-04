@@ -165,7 +165,7 @@ async fn start_gossip_process(
 
         let handle = tokio::task::spawn(async move {
             let active_state = Arc::new(
-                ActiveAuthority::new_with_ephemeral_follower_store(
+                ActiveAuthority::new_with_ephemeral_storage(
                     state,
                     inner_clients,
                     GatewayMetrics::new_for_tests(),

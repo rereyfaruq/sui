@@ -31,7 +31,7 @@ async fn pending_exec_storage_notify() {
         let clients = aggregator.clone_inner_clients();
         let _active_handle = tokio::task::spawn(async move {
             let active_state = Arc::new(
-                ActiveAuthority::new_with_ephemeral_follower_store(
+                ActiveAuthority::new_with_ephemeral_storage(
                     inner_state.authority.clone(),
                     clients,
                     GatewayMetrics::new_for_tests(),
@@ -115,7 +115,7 @@ async fn pending_exec_full() {
         let clients = aggregator.clone_inner_clients();
         let _active_handle = tokio::task::spawn(async move {
             let active_state = Arc::new(
-                ActiveAuthority::new_with_ephemeral_follower_store(
+                ActiveAuthority::new_with_ephemeral_storage(
                     inner_state.authority.clone(),
                     clients,
                     GatewayMetrics::new_for_tests(),
